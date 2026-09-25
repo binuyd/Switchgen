@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ESP32 MQTT Switch Controller</title>
+    <!-- MQTT.js library -->
+    <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+    <!-- Font Awesome Icons -->
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <!-- Custom Styles -->
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="floating-particles"></div>
+
+    <div class="main-container">
+        <!-- Header Section -->
+        <header class="header-wrapper">
+            <div class="brand-title-group">
+                <div class="brand-logo">
+                    <i class="fas fa-bolt"></i>
+                </div>
+                <h1 class="page-title">Smart Switch System</h1>
+            </div>
+            
+            <div id="connection-status" class="connection-status disconnected">
+                <div class="status-dot"></div>
+                <span>Connecting...</span>
+            </div>
+        </header>
+
+        <!-- Warning Notice Banner -->
+        <div class="system-warning-banner">
+            <i class="fas fa-triangle-exclamation"></i>
+            <span><strong>Notice:</strong> This system sends control commands via MQTT but does not receive real-time status feedback from devices.</span>
+        </div>
+
+        <!-- Devices Grid -->
+        <main id="devices" class="device-grid">
+            <!-- Device cards generated dynamically by JS -->
+        </main>
+    </div>
+
+    <script>
+        // MQTT Broker & Connection configuration
+        const broker = 'wss://broker.hivemq.com:8884/mqtt';
+        const options = {
+            connectTimeout: 4000,
+            clientId: 'webClient-' + Math.random().toString(16).substring(2, 10)
+        };
+
+        const client = mqtt.connect(broker, options);
+        const activeTimers = {};
+        const deviceStates = {};
+
+        // Connection status UI element
+        const connectionStatus = document.getElementById('connection-status');
+
+        client.on('connect', () => {
+            console.log('✅ Connected to MQTT broker');
+            if (connectionStatus) {
+                connectionStatus.className = 'connection-status connected';
+                connectionStatus.innerHTML = '<div class="status-dot"></div><span>Connected</span>';
+            }
+        });
+
+        client.on('disconnect', () => {
+            if (connectionStatus) {
+                connectionStatus.className = 'connection-status disconnected';
+                connectionStatus.innerHTML = '<div class="status-dot"></div><span>Disconnected</span>';
+            }
+            showNotification('Disconnected from MQTT broker', 'error');
+        });
+
+        client.on('error', (error) => {
+            console.error('MQTT Error:', error);
+            showNotification('Connection error occurred', 'error');
+        });
+
+        const devices = [
+            { id: "bulb", name: "Smart Bulb", icon: "fas fa-lightbulb", timer: true },
+            { id: "plug", name: "Smart Plug", icon: "fas fa-plug", timer: true },
+            { id: "fan", name: "Ceiling Fan", icon: "fas fa-fan", timer: true }
+        ];
+
+        function showNotification(message, type = 'info') {
+            const notification = document.createElement('div');
+            notification.className = `notification ${type}`;
+            notification.innerHTML = `<i class="fas fa-${type === 'success' ? 'check-circle' : type === 'error' ? 'exclamation-circle' : 'info-circle'}"></i><span>${message}</span>`;
+            document.body.appendChild(notification);
+
+            setTimeout(() => notification.classList.add('show'), 50);
+            setTimeout(() => {
+                notification.classList.remove('show');
+                setTimeout(() => {
+                    if (notification.parentNode) {
+                        notification.parentNode.removeChild(notification);
+                    }
+                }, 300);
+            }, 3000);
+        }
+
+        function updateDeviceState(device, isActive) {
+            deviceStates[device] = isActive;
+            const card = document.getElementById(`card-${device}`);
+            const badge = document.getElementById(`badge-${device}`);
+            
+            if (card) {
+                if (isActive) {
+                    card.classList.add('active');
+                } else {
+                    card.classList.remove('active');
+                }
+            }
+            if (badge) {
+                badge.textContent = isActive ? 'ACTIVE' : 'OFF';
+            }
+        }
+
+        function sendCommand(device, state) {
+            if (!client.connected) {
+                showNotification('Not connected to MQTT broker', 'error');
+                return;
+            }
+
+            const topic = `home/control/${device}`;
+            client.publish(topic, state);
+            console.log(`📤 Sent "${state}" to ${topic}`);
+            
+            updateDeviceState(device, state === 'ON');
+            showNotification(`${device.toUpperCase()} turned ${state}`, state === 'ON' ? 'success' : 'info');
+        }
+
+        function sendTimer(device) {
+            const hourInput = document.getElementById(`timer-hour-${device}`);
+            const minInput = document.getElementById(`timer-min-${device}`);
+            
+            const hours = parseInt(hourInput ? hourInput.value : 0) || 0;
+            const minutes = parseInt(minInput ? minInput.value : 0) || 0;
+            const totalSeconds = (hours * 3600) + (minutes * 60);
+
+            if (totalSeconds <= 0) {
+                showNotification("Please enter a valid timer duration", 'error');
+                return;
+            }
+
+            if (totalSeconds > 86400) { // 24 hours max
+                showNotification("Timer cannot exceed 24 hours", 'error');
+                return;
+            }
+
+            // Clear existing timer for this device if active
+            if (activeTimers[device]) {
+                clearInterval(activeTimers[device]);
+                delete activeTimers[device];
+            }
+
+            sendCommand(device, "ON");
+
+            const countdownEl = document.getElementById(`countdown-${device}`);
+            if (countdownEl) {
+                countdownEl.classList.add('active');
+            }
+            let remaining = totalSeconds;
+
+            activeTimers[device] = setInterval(() => {
+                const hrs = Math.floor(remaining / 3600);
+                const mins = Math.floor((remaining % 3600) / 60);
+                const secs = remaining % 60;
+                
+                if (countdownEl) {
+                    countdownEl.innerHTML = `<i class="fas fa-clock"></i><span>Time left: ${hrs.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}</span>`;
+                }
+                
+                if (--remaining < 0) {
+                    clearInterval(activeTimers[device]);
+                    delete activeTimers[device];
+                    
+                    if (countdownEl) {
+                        countdownEl.innerHTML = '<i class="fas fa-check"></i><span>Timer completed!</span>';
+                    }
+                    sendCommand(device, "OFF");
+                    
+                    setTimeout(() => {
+                        if (countdownEl) {
+                            countdownEl.classList.remove('active');
+                        }
+                    }, 3000);
+                }
+            }, 1000);
+
+            // Clear input fields
+            if (hourInput) hourInput.value = '';
+            if (minInput) minInput.value = '';
+        }
+
+        // Generate ambient background floating particles
+        function createParticles() {
+            const container = document.querySelector('.floating-particles');
+            if (!container) return;
+            for (let i = 0; i < 35; i++) {
+                const particle = document.createElement('div');
+                particle.className = 'particle';
+                particle.style.left = Math.random() * 100 + '%';
+                particle.style.animationDelay = (Math.random() * 15) + 's';
+                particle.style.animationDuration = (Math.random() * 10 + 15) + 's';
+                container.appendChild(particle);
+            }
+        }
+
+        // Generate device cards dynamically
+        const devicesContainer = document.getElementById("devices");
+        if (devicesContainer) {
+            devicesContainer.innerHTML = devices.map(device => `
+                <div class="device-card" id="card-${device.id}">
+                    <div class="card-body">
+                        <span class="device-badge-status" id="badge-${device.id}">OFF</span>
+                        <div class="device-icon-wrapper">
+                            <i class="${device.icon} device-icon"></i>
+                        </div>
+                        <h2 class="card-title">${device.name}</h2>
+                        
+                        <div class="control-buttons">
+                            <button class="btn-modern btn-on" onclick="sendCommand('${device.id}', 'ON')">
+                                <i class="fas fa-power-off"></i>ON
+                            </button>
+                            <button class="btn-modern btn-off" onclick="sendCommand('${device.id}', 'OFF')">
+                                <i class="fas fa-times"></i>OFF
+                            </button>
+                        </div>
+                        
+                        ${device.timer ? `
+                            <div class="timer-container">
+                                <div class="timer-inputs">
+                                    <input type="number" id="timer-hour-${device.id}" class="timer-input" placeholder="Hours" min="0" max="23">
+                                    <input type="number" id="timer-min-${device.id}" class="timer-input" placeholder="Mins" min="0" max="59">
+                                </div>
+                                <button class="btn-modern btn-timer" onclick="sendTimer('${device.id}')">
+                                    <i class="fas fa-clock"></i>Set Timer
+                                </button>
+                                <div id="countdown-${device.id}" class="countdown-display"></div>
+                            </div>` : ''}
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        // Initialize particles
+        createParticles();
+
+        // Add touch/haptic interactions for buttons
+        document.addEventListener('DOMContentLoaded', () => {
+            const buttons = document.querySelectorAll('.btn-modern');
+            buttons.forEach(button => {
+                button.addEventListener('mouseenter', () => {
+                    if (navigator.vibrate) {
+                        navigator.vibrate(10);
+                    }
+                });
+            });
+        });
+    </script>
+</body>
+</html>
