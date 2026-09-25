@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ESP32 MQTT Switch Controller</title>
+    <title>ESP32 Secure MQTT Switch Controller</title>
     <!-- MQTT.js library -->
     <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
     <!-- Font Awesome Icons -->
@@ -19,21 +19,26 @@
         <header class="header-wrapper">
             <div class="brand-title-group">
                 <div class="brand-logo">
-                    <i class="fas fa-bolt"></i>
+                    <i class="fas fa-shield-halved"></i>
                 </div>
-                <h1 class="page-title">Smart Switch System</h1>
+                <h1 class="page-title">Secure Switch System</h1>
             </div>
             
-            <div id="connection-status" class="connection-status disconnected">
-                <div class="status-dot"></div>
-                <span>Connecting...</span>
+            <div class="header-actions">
+                <div id="connection-status" class="connection-status disconnected">
+                    <div class="status-dot"></div>
+                    <span>Connecting...</span>
+                </div>
+                <button class="btn-settings" id="open-settings-btn" title="Broker & Security Settings">
+                    <i class="fas fa-cog"></i>
+                </button>
             </div>
         </header>
 
         <!-- Warning Notice Banner -->
         <div class="system-warning-banner">
             <i class="fas fa-triangle-exclamation"></i>
-            <span><strong>Notice:</strong> This system sends control commands via MQTT but does not receive real-time status feedback from devices.</span>
+            <span><strong>Notice:</strong> Commands are sent via obfuscated MQTT channels. This system does not receive real-time status feedback from physical hardware.</span>
         </div>
 
         <!-- Devices Grid -->
@@ -42,41 +47,128 @@
         </main>
     </div>
 
+    <!-- Security & Settings Modal -->
+    <div class="modal-overlay" id="settings-modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 class="modal-title"><i class="fas fa-user-lock"></i> MQTT Security Configuration</h3>
+                <button class="modal-close" id="close-settings-btn">&times;</button>
+            </div>
+            <form id="settings-form">
+                <div class="form-group">
+                    <label class="form-label">MQTT WebSocket Broker URL</label>
+                    <input type="text" id="cfg-broker" class="form-control-custom" placeholder="wss://broker.hivemq.com:8884/mqtt" required>
+                    <div class="form-hint">Use a private WSS endpoint for production.</div>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">MQTT Username (Optional)</label>
+                    <input type="text" id="cfg-username" class="form-control-custom" placeholder="Enter username">
+                </div>
+                <div class="form-group">
+                    <label class="form-label">MQTT Password / Auth Token (Optional)</label>
+                    <input type="password" id="cfg-password" class="form-control-custom" placeholder="Enter password or token">
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Device Secret Key / Obfuscated Topic Namespace</label>
+                    <input type="text" id="cfg-namespace" class="form-control-custom" placeholder="e.g. secret-namespace-998">
+                    <div class="form-hint">Topic format: <code>home/v1/{SecretKey}/control/{device}</code></div>
+                </div>
+                <button type="submit" class="btn-modern btn-timer" style="width: 100%; margin-top: 1rem;">
+                    <i class="fas fa-save"></i> Save & Reconnect
+                </button>
+            </form>
+        </div>
+    </div>
+
     <script>
-        // MQTT Broker & Connection configuration
-        const broker = 'wss://broker.hivemq.com:8884/mqtt';
-        const options = {
-            connectTimeout: 4000,
-            clientId: 'webClient-' + Math.random().toString(16).substring(2, 10)
+        // Default Security & Broker Configurations with LocalStorage Persistence
+        const DEFAULT_CONFIG = {
+            broker: 'wss://broker.hivemq.com:8884/mqtt',
+            username: '',
+            password: '',
+            namespace: 'sec-' + Math.random().toString(36).substring(2, 10)
         };
 
-        const client = mqtt.connect(broker, options);
+        function getStoredConfig() {
+            try {
+                const stored = localStorage.getItem('mqtt_sec_config');
+                if (stored) {
+                    return { ...DEFAULT_CONFIG, ...JSON.parse(stored) };
+                }
+            } catch (e) {
+                console.warn('LocalStorage error:', e);
+            }
+            return DEFAULT_CONFIG;
+        }
+
+        function saveConfig(cfg) {
+            try {
+                localStorage.setItem('mqtt_sec_config', JSON.stringify(cfg));
+            } catch (e) {
+                console.error('Failed to save configuration:', e);
+            }
+        }
+
+        let currentConfig = getStoredConfig();
+        let client = null;
         const activeTimers = {};
         const deviceStates = {};
 
-        // Connection status UI element
         const connectionStatus = document.getElementById('connection-status');
 
-        client.on('connect', () => {
-            console.log('✅ Connected to MQTT broker');
-            if (connectionStatus) {
-                connectionStatus.className = 'connection-status connected';
-                connectionStatus.innerHTML = '<div class="status-dot"></div><span>Connected</span>';
+        function initMQTTClient() {
+            if (client) {
+                try { client.end(true); } catch (e) {}
             }
-        });
 
-        client.on('disconnect', () => {
+            const connectOptions = {
+                connectTimeout: 5000,
+                clientId: 'webClient-' + Math.random().toString(36).substring(2, 10),
+                keepalive: 60,
+                clean: true
+            };
+
+            if (currentConfig.username && currentConfig.username.trim() !== '') {
+                connectOptions.username = currentConfig.username.trim();
+            }
+            if (currentConfig.password && currentConfig.password.trim() !== '') {
+                connectOptions.password = currentConfig.password.trim();
+            }
+
+            console.log(`Connecting to broker: ${currentConfig.broker} with namespace: ${currentConfig.namespace}`);
+            
             if (connectionStatus) {
                 connectionStatus.className = 'connection-status disconnected';
-                connectionStatus.innerHTML = '<div class="status-dot"></div><span>Disconnected</span>';
+                connectionStatus.innerHTML = '<div class="status-dot"></div><span>Connecting...</span>';
             }
-            showNotification('Disconnected from MQTT broker', 'error');
-        });
 
-        client.on('error', (error) => {
-            console.error('MQTT Error:', error);
-            showNotification('Connection error occurred', 'error');
-        });
+            try {
+                client = mqtt.connect(currentConfig.broker, connectOptions);
+
+                client.on('connect', () => {
+                    console.log('✅ Connected to MQTT broker securely');
+                    if (connectionStatus) {
+                        connectionStatus.className = 'connection-status connected';
+                        connectionStatus.innerHTML = '<div class="status-dot"></div><span>Connected</span>';
+                    }
+                });
+
+                client.on('disconnect', () => {
+                    if (connectionStatus) {
+                        connectionStatus.className = 'connection-status disconnected';
+                        connectionStatus.innerHTML = '<div class="status-dot"></div><span>Disconnected</span>';
+                    }
+                });
+
+                client.on('error', (error) => {
+                    console.error('MQTT Error:', error);
+                    showNotification('Connection error occurred', 'error');
+                });
+            } catch (err) {
+                console.error('MQTT Initialization Failure:', err);
+                showNotification('Invalid Broker URL configuration', 'error');
+            }
+        }
 
         const devices = [
             { id: "bulb", name: "Smart Bulb", icon: "fas fa-lightbulb", timer: true },
@@ -119,38 +211,83 @@
         }
 
         function sendCommand(device, state) {
-            if (!client.connected) {
+            if (!client || !client.connected) {
                 showNotification('Not connected to MQTT broker', 'error');
                 return;
             }
 
-            const topic = `home/control/${device}`;
-            client.publish(topic, state);
-            console.log(`📤 Sent "${state}" to ${topic}`);
+            // Obfuscated & Namespaced Topic Structure
+            const sanitizedNamespace = currentConfig.namespace.trim().replace(/[^a-zA-Z0-9_-]/g, '');
+            const topic = `home/v1/${sanitizedNamespace}/control/${device}`;
             
-            updateDeviceState(device, state === 'ON');
-            showNotification(`${device.toUpperCase()} turned ${state}`, state === 'ON' ? 'success' : 'info');
+            // Validate payload state
+            const payload = (state === 'ON') ? 'ON' : 'OFF';
+            
+            client.publish(topic, payload, { qos: 1 });
+            console.log(`📤 Sent "${payload}" to Obfuscated Topic: ${topic}`);
+            
+            updateDeviceState(device, payload === 'ON');
+            showNotification(`${device.toUpperCase()} turned ${payload}`, payload === 'ON' ? 'success' : 'info');
+        }
+
+        /**
+         * Strict Input Sanitization & Validation for Timer Controls
+         */
+        function validateTimerInput(value, max) {
+            if (value === null || value === undefined || value.trim() === '') return 0;
+            
+            // Reject non-numeric characters, floats, or scientific notation
+            if (!/^\d+$/.test(value.trim())) {
+                return null;
+            }
+            
+            const num = Number(value.trim());
+            if (!Number.isInteger(num) || num < 0 || num > max) {
+                return null;
+            }
+            return num;
         }
 
         function sendTimer(device) {
             const hourInput = document.getElementById(`timer-hour-${device}`);
             const minInput = document.getElementById(`timer-min-${device}`);
             
-            const hours = parseInt(hourInput ? hourInput.value : 0) || 0;
-            const minutes = parseInt(minInput ? minInput.value : 0) || 0;
+            const hoursVal = hourInput ? hourInput.value : '';
+            const minsVal = minInput ? minInput.value : '';
+
+            // Strict Server-grade Input Validation
+            const hours = validateTimerInput(hoursVal, 23);
+            const minutes = validateTimerInput(minsVal, 59);
+
+            if (hours === null) {
+                if (hourInput) hourInput.classList.add('invalid');
+                showNotification("Invalid Hours! Must be a whole number between 0 and 23.", 'error');
+                return;
+            } else if (hourInput) {
+                hourInput.classList.remove('invalid');
+            }
+
+            if (minutes === null) {
+                if (minInput) minInput.classList.add('invalid');
+                showNotification("Invalid Minutes! Must be a whole number between 0 and 59.", 'error');
+                return;
+            } else if (minInput) {
+                minInput.classList.remove('invalid');
+            }
+
             const totalSeconds = (hours * 3600) + (minutes * 60);
 
             if (totalSeconds <= 0) {
-                showNotification("Please enter a valid timer duration", 'error');
+                showNotification("Please specify a duration greater than 0 minutes.", 'error');
                 return;
             }
 
-            if (totalSeconds > 86400) { // 24 hours max
-                showNotification("Timer cannot exceed 24 hours", 'error');
+            if (totalSeconds > 86400) { // Max 24 Hours
+                showNotification("Timer duration cannot exceed 24 hours.", 'error');
                 return;
             }
 
-            // Clear existing timer for this device if active
+            // Clear existing timer if running
             if (activeTimers[device]) {
                 clearInterval(activeTimers[device]);
                 delete activeTimers[device];
@@ -209,7 +346,7 @@
             }
         }
 
-        // Generate device cards dynamically
+        // Render Device Cards
         const devicesContainer = document.getElementById("devices");
         if (devicesContainer) {
             devicesContainer.innerHTML = devices.map(device => `
@@ -246,10 +383,47 @@
             `).join('');
         }
 
-        // Initialize particles
-        createParticles();
+        // Settings Modal Management
+        const modal = document.getElementById('settings-modal');
+        const openBtn = document.getElementById('open-settings-btn');
+        const closeBtn = document.getElementById('close-settings-btn');
+        const settingsForm = document.getElementById('settings-form');
 
-        // Add touch/haptic interactions for buttons
+        if (openBtn && modal) {
+            openBtn.addEventListener('click', () => {
+                document.getElementById('cfg-broker').value = currentConfig.broker;
+                document.getElementById('cfg-username').value = currentConfig.username;
+                document.getElementById('cfg-password').value = currentConfig.password;
+                document.getElementById('cfg-namespace').value = currentConfig.namespace;
+                modal.classList.add('show');
+            });
+        }
+
+        if (closeBtn && modal) {
+            closeBtn.addEventListener('click', () => {
+                modal.classList.remove('show');
+            });
+        }
+
+        if (settingsForm) {
+            settingsForm.addEventListener('submit', (e) => {
+                e.preventDefault();
+                currentConfig.broker = document.getElementById('cfg-broker').value.trim();
+                currentConfig.username = document.getElementById('cfg-username').value.trim();
+                currentConfig.password = document.getElementById('cfg-password').value.trim();
+                currentConfig.namespace = document.getElementById('cfg-namespace').value.trim() || 'default-namespace';
+                
+                saveConfig(currentConfig);
+                if (modal) modal.classList.remove('show');
+                showNotification('Configuration saved! Reconnecting...', 'success');
+                initMQTTClient();
+            });
+        }
+
+        // Initialize App & Connection
+        createParticles();
+        initMQTTClient();
+
         document.addEventListener('DOMContentLoaded', () => {
             const buttons = document.querySelectorAll('.btn-modern');
             buttons.forEach(button => {

@@ -135,6 +135,33 @@ body {
     margin: 0;
 }
 
+.header-actions {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.btn-settings {
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid var(--card-border);
+    color: var(--text-main);
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: var(--transition);
+}
+
+.btn-settings:hover {
+    background: var(--primary);
+    color: white;
+    border-color: var(--primary);
+    box-shadow: 0 0 15px var(--primary-glow);
+}
+
 /* Warning Notice Banner */
 .system-warning-banner {
     background: var(--warning-bg);
@@ -399,6 +426,11 @@ body {
     background: rgba(15, 23, 42, 0.95);
 }
 
+.timer-input.invalid {
+    border-color: var(--danger);
+    box-shadow: 0 0 0 3px var(--danger-glow);
+}
+
 .btn-timer {
     background: rgba(99, 102, 241, 0.15);
     color: #a5b4fc;
@@ -434,6 +466,109 @@ body {
 @keyframes fadeIn {
     from { opacity: 0; transform: translateY(4px); }
     to { opacity: 1; transform: translateY(0); }
+}
+
+/* Modal Overlay & Dialog */
+.modal-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    background: rgba(0, 0, 0, 0.7);
+    backdrop-filter: blur(8px);
+    z-index: 2000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0;
+    pointer-events: none;
+    transition: var(--transition);
+}
+
+.modal-overlay.show {
+    opacity: 1;
+    pointer-events: auto;
+}
+
+.modal-content {
+    background: #111827;
+    border: 1px solid var(--card-border);
+    border-radius: var(--radius-lg);
+    width: 90%;
+    max-width: 500px;
+    padding: 2rem;
+    box-shadow: 0 25px 50px rgba(0, 0, 0, 0.6);
+    transform: scale(0.95);
+    transition: var(--transition);
+}
+
+.modal-overlay.show .modal-content {
+    transform: scale(1);
+}
+
+.modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1.5rem;
+}
+
+.modal-title {
+    font-size: 1.25rem;
+    font-weight: 700;
+    color: var(--text-main);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.modal-close {
+    background: transparent;
+    border: none;
+    color: var(--text-muted);
+    font-size: 1.25rem;
+    cursor: pointer;
+    transition: var(--transition);
+}
+
+.modal-close:hover {
+    color: var(--text-main);
+}
+
+.form-group {
+    margin-bottom: 1.25rem;
+}
+
+.form-label {
+    display: block;
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--text-muted);
+    margin-bottom: 6px;
+}
+
+.form-control-custom {
+    width: 100%;
+    background: rgba(15, 23, 42, 0.8);
+    border: 1px solid var(--card-border);
+    border-radius: var(--radius-sm);
+    padding: 10px 14px;
+    color: var(--text-main);
+    font-size: 0.9rem;
+    transition: var(--transition);
+}
+
+.form-control-custom:focus {
+    outline: none;
+    border-color: var(--primary);
+    box-shadow: 0 0 0 3px var(--primary-glow);
+}
+
+.form-hint {
+    font-size: 0.75rem;
+    color: #64748b;
+    margin-top: 4px;
 }
 
 /* Toast Notifications */
